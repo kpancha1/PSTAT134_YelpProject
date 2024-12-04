@@ -1,0 +1,118 @@
+---
+title: "PSTAT134_Yelp_Final"
+format: pdf
+editor: visual
+---
+
+# Final Project: NLP on Yelp Reviews
+
+## PSTAT 134 - Group 19
+
+### Installing Packages:
+
+```{r, results='hide'}
+library(tidyverse)
+library(tidymodels)
+library(tidytext)
+library(kableExtra)
+library(ggplot2)
+library(stopwords)
+library(wordcloud)
+library(reshape2)
+library(igraph)
+library(ggraph)
+```
+
+### Load in Dataset:
+
+```{r}
+yelp <- read.csv("~/Downloads/dataset.csv")
+```
+
+Let's take a look at the entire dataset's distribution of `review_stars`, the number of stars the reviewer gave the business. We look at this distribution because this
+
+```{r}
+yelp %>%
+  ggplot(aes(x = review_stars)) +
+  geom_bar() +
+  labs(
+    title = "Distribution of Reviewers' Star Rating",
+    x = "Reviews' Star Ratings",
+    y = "Count"
+  ) +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+```
+
+This dataset has almost seven million observations. To work with the data, we will take a random sample of $10,000$ reviews, stratified by `review_stars`.
+
+We stratify on `review_stars` to ensure that we are able to capture a representative distribution of reviews across all star ratings. Since `review_stars` reflects the sentiment or quality of the review (ranging from 1 star for very negative to 5 stars for very positive), stratifying by this variable guarantees that every rating level is proportionally included in the sample. This avoids over- or under-representing any particular rating category in the sample.
+
+```{r}
+yelp_sample <- yelp %>% 
+  group_by(review_stars) %>%
+  sample_frac(10000 / nrow(yelp)) %>%
+  ungroup()
+```
+
+We see that the proportion below remains the same. Let's continue with data cleaning.
+
+```{r}
+yelp_sample %>%
+  ggplot(aes(x = review_stars)) +
+  geom_bar() +
+  labs(
+    title = "Distribution of Reviewers' Star Rating",
+    x = "Reviews' Star Ratings",
+    y = "Count"
+  ) +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+```
+
+### Data Cleaning
+
+```{r}
+# using tidytext stop words lexicon
+data("stop_words")
+
+yelp_sample %>% 
+  unnest_tokens(word, text) %>% # tokenizing reviews into words
+  anti_join(stop_words) %>% # removing stop words
+  count(word, sort = TRUE) %>% 
+  head(n = 30) %>% 
+  kbl() %>%
+  scroll_box(width = "400px", height = "500px")
+```
+
+```{r}
+# cleaning the reviews
+remove <- c('[[:punct:]]', 
+            '[[:digit:]]', 
+            '[[:symbol:]]') %>%
+  paste(collapse = '|')
+# removing any other weird characters,
+# any backslashes, adding space before capital
+# letters and removing extra whitespace,
+# replacing capital letters with lowercase letters
+yelp_sample$text <- yelp_sample$text %>% 
+  str_remove_all('\'') %>%
+  str_replace_all(remove, ' ') %>%
+  str_replace_all("([a-z])([A-Z])", "\\1 \\2") %>%
+  tolower() %>%
+  str_replace_all("\\s+", " ")
+```
+
+```{r}
+yelp_sample_tokenized <- yelp_sample %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words)
+
+yelp_sample_tokenized %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 1000) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL)
+```
