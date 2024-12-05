@@ -165,12 +165,30 @@ yelp_bigrams <- yelp_sample %>%
   separate(bigram, c("word1", "word2"), sep = " ") %>%
   filter(!word1 %in% stop_words$word) %>%
   filter(!word2 %in% stop_words$word) %>%
-  select(label, word1, word2)
+  select(review_stars, word1, word2)
+```
+
+```{r}
+neg_bigrams <- yelp_bigrams %>%
+  filter(review_stars %in% c(1, 2)) %>%
+  count(word1, word2) %>%
+  filter(n > 50) %>%
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(neg_bigrams, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  labs(title = "Bigram Network for One and Two Star Reviews") +
+  theme_void()
 ```
 
 ```{r}
 pos_bigrams <- yelp_bigrams %>%
-  filter(label == "POSITIVE") %>%
+  filter(review_stars %in% c(4, 5)) %>%
   count(word1, word2) %>%
   filter(n > 50) %>%
   graph_from_data_frame()
@@ -182,6 +200,6 @@ ggraph(pos_bigrams, layout = "fr") +
                  arrow = a, end_cap = circle(.07, 'inches')) +
   geom_node_point(color = "lightblue", size = 5) +
   geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
-  labs(title = "Bigram Network for Positive Reviews") +
+  labs(title = "Bigram Network for One and Two Star Reviews") +
   theme_void()
 ```
