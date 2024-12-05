@@ -29,7 +29,7 @@ library(ggraph)
 yelp <- read.csv("~/Downloads/dataset.csv")
 ```
 
-Let's take a look at the entire dataset's distribution of `review_stars`, the number of stars the reviewer gave the business. We look at this distribution because this
+Let's take a look at the entire dataset's distribution of `review_stars`, the number of stars the reviewer gave the business.
 
 ```{r}
 yelp %>%
@@ -72,6 +72,33 @@ yelp_sample %>%
 
 ### Data Cleaning
 
+Observing the csv file, we see that the `yelping_since` column give the specific date and time at which the user created their Yelp profile. We do not require such detailed information for our analysis so we will keep only the year the user joined Yelp.
+
+```{r}
+yelp_sample <- yelp_sample %>%
+  mutate(yelping_since = substr(yelping_since, 1, 4)) # get only the year
+```
+
+We also want to clean the actual reviews so that we are able to properly perform NLP analysis on the text. That is done below by removing punctuation, symbols, extra white space, adding a space before capital letters, and replacing all uppercase with lowercase letters.
+
+```{r}
+# cleaning the reviews (text column)
+remove <- c('[[:punct:]]', 
+            '[[:digit:]]', 
+            '[[:symbol:]]',
+            'im', 'ive') %>%
+  paste(collapse = '|')
+
+yelp_sample$text <- yelp_sample$text %>% 
+  str_remove_all('\'') %>%
+  str_replace_all(remove, ' ') %>%
+  str_replace_all("([a-z])([A-Z])", "\\1 \\2") %>%
+  tolower() %>%
+  str_replace_all("\\s+", " ")
+```
+
+#### Removing Stop Words
+
 ```{r}
 # using tidytext stop words lexicon
 data("stop_words")
@@ -85,23 +112,7 @@ yelp_sample %>%
   scroll_box(width = "400px", height = "500px")
 ```
 
-```{r}
-# cleaning the reviews
-remove <- c('[[:punct:]]', 
-            '[[:digit:]]', 
-            '[[:symbol:]]') %>%
-  paste(collapse = '|')
-# removing any other weird characters,
-# any backslashes, adding space before capital
-# letters and removing extra whitespace,
-# replacing capital letters with lowercase letters
-yelp_sample$text <- yelp_sample$text %>% 
-  str_remove_all('\'') %>%
-  str_replace_all(remove, ' ') %>%
-  str_replace_all("([a-z])([A-Z])", "\\1 \\2") %>%
-  tolower() %>%
-  str_replace_all("\\s+", " ")
-```
+#### Most Common Words
 
 ```{r}
 yelp_sample_tokenized <- yelp_sample %>% 
@@ -114,5 +125,63 @@ yelp_sample_tokenized %>%
   mutate(word = reorder(word, n)) %>%
   ggplot(aes(n, word)) +
   geom_col() +
-  labs(y = NULL)
+  labs(y = NULL) +
+  theme_minimal()
+```
+
+```{r}
+yelp_sample_tokenized %>%
+  count(review_stars, word, sort = TRUE) %>%
+  filter(n > 600) %>%
+  mutate(word = reorder_within(word, n, review_stars)) %>%
+  ggplot(aes(x = n, y = word, fill = review_stars)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~review_stars, scales = "free_y", 
+             labeller = labeller(review_stars = function(x) paste(x, "Stars"))) +
+  scale_y_reordered() +
+  labs(title = "Most Common Words by Reviewers' Star Rating",
+       x = "Frequency",
+       y = NULL) +
+  theme_minimal()
+
+```
+
+#### Word Cloud
+
+```{r}
+yelp_sample_tokenized %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("red", "blue"),
+                   max.words = 100)
+```
+
+#### Bigram Networks
+
+```{r}
+yelp_bigrams <- yelp_sample %>% 
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  select(label, word1, word2)
+```
+
+```{r}
+pos_bigrams <- yelp_bigrams %>%
+  filter(label == "POSITIVE") %>%
+  count(word1, word2) %>%
+  filter(n > 50) %>%
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(pos_bigrams, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  labs(title = "Bigram Network for Positive Reviews") +
+  theme_void()
 ```
