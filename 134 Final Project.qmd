@@ -1,0 +1,166 @@
+---
+title: "134 Final Project - Yelp Review NLP"
+format: pdf
+editor: visual
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(stringr)
+library(igraph)
+library(ggraph)
+library(tidytext)
+library(wordcloud)
+library(stringr)
+library(textTinyR)
+library(tm)
+library(e1071)
+library(tidyr)
+library(caret)
+library(naniar)
+
+yelp = read_csv('cleaned_dataset.csv')
+
+# Check NA Values
+vis_miss(yelp, warn_large_data = FALSE)  # NA Values
+
+# Look at Label Distribution
+table(yelp$review_stars)
+
+ggplot(yelp, aes(x = review_stars, fill = review_stars)) +
+  geom_bar() +
+  labs(title = 'Distribution of Rating',
+       x = 'Label',
+       y = 'Count') +
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.3)
+```
+
+```{r}
+# Sample Stratified
+set.seed(123)
+sample_size = 10000
+stratified_sample = yelp %>% 
+  group_by(review_stars) %>% 
+  sample_n(size = sample_size / n_distinct(review_stars), replace = FALSE) %>% 
+  ungroup()
+
+# Load a list of stop words
+data('stop_words') 
+
+# Clean and tokenize
+cleaned_reviews = stratified_sample %>% 
+  mutate(text = str_to_lower(text),
+         text = str_remove_all(text, '[[:punct:]]')) %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words, by = 'word')
+
+# Verify
+cleaned_reviews %>% 
+  count(word, sort = TRUE)
+```
+
+The Most Commonly-Occuring words
+
+```{r}
+# Count most commonly-occuring words
+mco = cleaned_reviews %>% 
+  count(word, sort = TRUE) %>% 
+  slice_max(n, n = 20)
+
+# Bar Chart
+ggplot(mco, aes(x = reorder(word, n), y = n)) +
+  geom_bar(stat = 'identity', fill = 'steelblue') +
+  coord_flip() +
+  labs(title = 'Top 20 Most Common Words Overall',
+       x = 'Word',
+       y = 'Count')
+
+# Count by star
+mco_star = cleaned_reviews %>% 
+  group_by(review_stars) %>% 
+  count(word, sort = TRUE) %>% 
+  slice_max(n, n = 10)  # Top 10 words per label
+
+# Bar Chart
+ggplot(mco_star, aes(x = reorder(word, n), y = n, fill = review_stars)) +
+  geom_bar(stat = 'identity') +
+  facet_wrap(~review_stars, scales = 'free_y') +
+  coord_flip() +
+  labs(title = 'Top 10 Most Common Words by Label',
+       x = 'Word',
+       y = 'Count')
+```
+
+Comparison of two cities
+
+```{r}
+# Filter the dataset for Philadelphia and North Wales
+filtered_reviews = cleaned_reviews %>%
+  filter(city %in% c("Philadelphia", "North Wales"))
+
+# Count the top 10 most common words for each city
+top_words_by_city = filtered_reviews %>%
+  group_by(city) %>%
+  count(word, sort = TRUE) %>%
+  slice_max(n, n = 10) %>%
+  ungroup()
+
+# Reshape the data for comparison
+comparison_table = top_words_by_city %>%
+  group_by(city) %>%
+  mutate(rank = row_number()) %>%
+  pivot_wider(names_from = city, values_from = n) %>%
+  rename(
+    Philadelphia_Count = Philadelphia,
+    North_Wales_Count = 'North Wales'
+  )
+
+# View the comparison
+comparison_table
+
+# Optional: Visualize the comparison with a bar chart
+library(ggplot2)
+
+ggplot(top_words_by_city, aes(x = reorder(word, n), y = n, fill = city)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  labs(
+    title = "Top 10 Commonly Occurring Words in Philadelphia and North Wales",
+    x = "Words",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+Word Cloud
+
+```{r}
+# Count the top words for each review_stars category
+top_words_by_stars = cleaned_reviews %>%
+  group_by(review_stars) %>%
+  count(word, sort = TRUE) %>%
+  slice_max(n, n = 20)
+
+# Generate word clouds by review_stars
+unique_stars = unique(top_words_by_stars$review_stars)
+
+for (star in unique_stars) {
+  cat("Creating word cloud for review_stars =", star, "\n")
+  
+  # Filter words for the specific star rating
+  words = top_words_by_stars %>% filter(review_stars == star)
+  
+  # Generate the word cloud
+  wordcloud(
+    words = words$word,
+    freq = words$n,
+    min.freq = 1,
+    max.words = 100,
+    random.order = FALSE,
+    scale = c(3, 0.5),
+    colors = brewer.pal(8, "Dark2")
+  )
+}
+```
