@@ -8,7 +8,19 @@ editor: visual
 
 ## PSTAT 134 - Group 19
 
-### Installing Packages:
+## Introduction
+
+This project utilizes a precompiled dataset from Yelp known as the Yelp Open Dataset. This dataset is made for academic use and research. The data is in JSON format and includes 6,990,280 reviews from 150,346 businesses over 11 metropolitan areas. Additionally, there are about 900,000 tips from over a million users which include over 1.2 million business attributes like hours, parking, availability, and ambience. The goal of this data science project is to utilize natural language processing and perform exploratory data analysis to gain insights that can help reveal patterns and trends between reviewers/reviews and business star ratings, votes, business categories, and more. We are interested in finding what insights from reviews are impactful in determining review star ratings and thereby business star ratings.
+
+## Methods
+
+Due to the dataset being in JSON format, initial data cleaning was required. The file, \`get_data.R\`, retrieves the JSON file and converts the data into a more readable format as multiple CSV files. The script processes the JSON file in chunks of 1,000 lines and saves processed chunks of data into .rds files every 1,000,000 lines to prevent memory overload. 
+
+The file, \`dataset.R\`, is the script in which the CSV files are unified and unnecessary variables are dropped, such as the \`friends\` column.  This file results in a final and cleaned \`dataset.csv\` file with over one million observations (reviews). The variables in this file are user_id, business_id, review_stars, vote_useful, vote_funny	, vote_cool, text, city, business_stars, business_review_count, categories, user_review_count, yelping_since, user_useful, user_funny, user_cool, elite, fans, average_stars, compliment_hot, compliment_more, compliment_profile, compliment_cute, compliment_list	compliment_note, compliment_plain, compliment_cool, compliment_funny, compliment_writer	compliment_photos, tip_compliment_count, total_vote, and total_compliments.
+
+### Setup
+
+#### Installing Packages
 
 ```{r, results='hide'}
 library(tidyverse)
@@ -23,11 +35,13 @@ library(igraph)
 library(ggraph)
 ```
 
-### Load in Dataset:
+#### Load in Dataset
 
 ```{r}
 yelp <- read.csv("~/Downloads/dataset.csv")
 ```
+
+### Distribution of Reviewers' Star Ratings
 
 Let's take a look at the entire dataset's distribution of `review_stars`, the number of stars the reviewer gave the business.
 
@@ -55,7 +69,7 @@ yelp_sample <- yelp %>%
   ungroup()
 ```
 
-We see that the proportion below remains the same. Let's continue with data cleaning.
+We see that the proportion below remains the same. We can now begin with data cleaning of the working dataset, `yelp_sample`.
 
 ```{r}
 yelp_sample %>%
