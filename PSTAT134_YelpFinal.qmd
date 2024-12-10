@@ -45,23 +45,21 @@ library(shiny)
 library(htmltools)
 library(kableExtra)
 library(tidyr)
-
-
 ```
 
 #### Load in Dataset
 
 ```{r}
-yelp <- fread("cleaned_dataset.csv")
+yelp <- fread("~/Downloads/cleaned_dataset.csv")
 ```
 
-### Checking NA values
+### Checking NA Values
+
+We see from the visualization below that our CSV has no missing values. Therefore we may continue to further analysis.
 
 ```{r}
 vis_miss(yelp, warn_large_data = FALSE) 
 ```
-
-/////commetns
 
 ### Distribution of Reviewers' Star Ratings
 
@@ -88,7 +86,7 @@ We stratify on `review_stars` to ensure that we are able to capture a representa
 ```{r}
 yelp_sample <- yelp %>% 
   group_by(review_stars) %>%
-  sample_frac(1000000 / nrow(yelp)) %>%
+  sample_frac(100000 / nrow(yelp)) %>%
   ungroup()
 ```
 
@@ -109,7 +107,6 @@ yelp_sample %>%
 
 ```
 
-
 ### Data Cleaning
 
 Observing the csv file, we see that the `yelping_since` column give the specific date and time at which the user created their Yelp profile. We do not require such detailed information for our analysis so we will keep only the year the user joined Yelp.
@@ -126,7 +123,7 @@ We also want to clean the actual reviews so that we are able to properly perform
 remove <- c('[[:punct:]]', 
             '[[:digit:]]', 
             '[[:symbol:]]',
-            'im', 'ive') %>%
+            'im', 'ive', 'didnt') %>%
   paste(collapse = '|')
 
 yelp_sample$text <- yelp_sample$text %>% 
@@ -138,6 +135,8 @@ yelp_sample$text <- yelp_sample$text %>%
 ```
 
 #### Removing Stop Words
+
+Global stop words are words such as "didn't", "of", and "or", for example.These words are very common and typically don’t add much to the meaning of a text so we can remove them to focus on relevant words. We use the tidytext stop words lexicon.
 
 ```{r}
 # using tidytext stop words lexicon
@@ -154,7 +153,7 @@ yelp_sample %>%
 
 #### Most Common Words
 
-#coment on common words
+Let's take a look at the top 20 most common words across all reviews.
 
 ```{r}
 yelp_sample_tokenized <- yelp_sample %>% 
@@ -170,8 +169,9 @@ ggplot(word_counts[1:20,], aes(n, word)) +
   geom_col() +
   labs(y = NULL) +
   theme_minimal()
-
 ```
+
+We now want to observe the difference between the most common words in lower rated (1-3 star) reviews and the most common words in higher rated (4-5 star) reviews.
 
 ```{r}
 word_counts_by <- yelp_sample_tokenized %>%
@@ -181,9 +181,6 @@ word_counts_by <- yelp_sample_tokenized %>%
   
 word_counts_1to3 <- word_counts_by %>%
   filter(review_stars %in% 1:3)
-
-word_counts_4to5 <- word_counts_by %>%
-  filter(review_stars %in% 4:5)
 
 plot_1to3 <- ggplot(word_counts_1to3[1:40, ], aes(x = n, y = word, fill = review_stars)) +
   geom_col(show.legend = FALSE) +
@@ -195,6 +192,13 @@ plot_1to3 <- ggplot(word_counts_1to3[1:40, ], aes(x = n, y = word, fill = review
        y = NULL) +
   theme_minimal()
 
+print(plot_1to3)
+```
+
+```{r}
+word_counts_4to5 <- word_counts_by %>%
+  filter(review_stars %in% 4:5)
+
 plot_4to5 <- ggplot(word_counts_4to5[1:40, ], aes(x = n, y = word, fill = review_stars)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~review_stars, scales = "free_y", 
@@ -205,14 +209,12 @@ plot_4to5 <- ggplot(word_counts_4to5[1:40, ], aes(x = n, y = word, fill = review
        y = NULL) +
   theme_minimal()
 
-print(plot_1to3)
 print(plot_4to5)
-
 ```
 
 #### Word Cloud
 
-#comment on the positive and negative meaning
+Word clouds allow us to visualize the most common words in a different way. The larger the word is shown, the more common it is. We have created a word cloud that distinguishes words based on negative or positive sentiment. The red words indicate positive sentiment and the blue words indicate negative sentiment.
 
 ```{r}
 sentiment_counts <- yelp_sample_tokenized %>%
@@ -221,7 +223,7 @@ sentiment_counts <- yelp_sample_tokenized %>%
   acast(word ~ sentiment, value.var = "n", fill = 0)
 
 comparison.cloud(sentiment_counts,
-                 colors = c("red", "blue"),
+                 colors = c("red3", "navyblue"),
                  max.words = 50, 
                  scale = c(2.5, 0.5),
                  random.order = FALSE,
@@ -229,6 +231,8 @@ comparison.cloud(sentiment_counts,
 ```
 
 #### Bigram Networks
+
+Bigram networks allow us to visualize bigrams (groups of 2 associated words). The weight of the arrows indicate the strength of the correlation between two words. We again will create two graphs – one for lower rated (1-3 star) reviews and one for higher rated (4-5 star) reviews.
 
 ```{r}
 yelp_bigrams <- yelp_sample %>% 
@@ -241,7 +245,7 @@ yelp_bigrams <- yelp_sample %>%
 
 ```{r}
 neg_bigrams <- yelp_bigrams %>%
-  filter(review_stars %in% c(1, 2)) %>%
+  filter(review_stars %in% c(1, 2, 3)) %>%
   count(word1, word2) %>%
   filter(n > 150) %>%
   graph_from_data_frame()
@@ -253,8 +257,10 @@ ggraph(neg_bigrams, layout = "fr") +
                  arrow = a, end_cap = circle(.07, 'inches')) +
   geom_node_point(color = "lightblue", size = 5) +
   geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
-  labs(title = "Bigram Network for One and Two Star Reviews") 
+  labs(title = "Bigram Network for 1-3 Star Reviews") 
 ```
+
+We see from the above bigram network for 1-3 star reviews that
 
 ```{r}
 pos_bigrams <- yelp_bigrams %>%
@@ -268,7 +274,9 @@ a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
 ggraph(pos_bigrams, layout = "fr") +
   geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
                  arrow = a, end_cap = circle(.07, 'inches')) +
-  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_point(color = "violet", size = 5) +
   geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
-  labs(title = "Bigram Network for Four and Five Star Reviews") 
+  labs(title = "Bigram Network for 4-5 Star Reviews") 
 ```
+
+We see from the above bigram network for 4-5 star reviews that
