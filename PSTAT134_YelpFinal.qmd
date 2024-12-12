@@ -55,18 +55,19 @@ library(RColorBrewer)
 #### Load in Dataset
 
 ```{r}
-yelp <- fread("cleaned_dataset.csv")
+yelp <- fread("~/Downloads/cleaned_dataset.csv")
 ```
 
 #### Checking NA Values
 
-We see from the visualization below that our CSV has no missing values. Therefore we may continue to further analysis.
+We see below that our CSV has no missing values. Therefore we may continue to further analysis.
 
 ```{r}
-vis_miss(yelp, warn_large_data = FALSE) 
+sum(is.na(yelp))
 ```
 
 ### EDA
+
 #### Distribution of Reviewers' Star Ratings
 
 Let's take a look at the entire dataset's distribution of `review_stars`, the number of stars the reviewer gave the business.
@@ -85,14 +86,14 @@ yelp %>%
   theme_minimal()
 ```
 
-This dataset has almost seven million observations. To work with the data, we will take a random sample of $10,000$ reviews, stratified by `review_stars`.
+This dataset has almost seven million observations. To work with the data, we will take a random sample of 100,000 reviews, stratified by `review_stars`.
 
 We stratify on `review_stars` to ensure that we are able to capture a representative distribution of reviews across all star ratings. Since `review_stars` reflects the sentiment or quality of the review (ranging from 1 star for very negative to 5 stars for very positive), stratifying by this variable guarantees that every rating level is proportionally included in the sample. This avoids over- or under-representing any particular rating category in the sample.
 
 ```{r}
 yelp_sample <- yelp %>% 
   group_by(review_stars) %>%
-  sample_frac(100000 / nrow(yelp)) %>%
+  sample_frac(10000 / nrow(yelp)) %>%
   ungroup()
 ```
 
@@ -113,12 +114,12 @@ yelp_sample %>%
 
 ```
 
-#### Review counts for states
+#### Distribution of Reviews by State
 
 Let's examine the overall distribution of states, representing the locations of the restaurants.
 
 ```{r}
-yelp %>% 
+yelp_sample %>% 
   count(state) %>%  
   filter(n > 50) %>%  
   ggplot(aes(x = reorder(state, n), y = n)) +  
@@ -128,19 +129,17 @@ yelp %>%
     x = "State",
     y = "Count") +
   geom_text(aes(label = n), hjust = -0.3) +  
-  ylim(c(0,2000000)) +
   coord_flip()
-
 ```
 
 This bar chart illustrates the distribution of restaurants across states, with only states having more than 50 counts displayed. Pennsylvania (PA) has the highest count of restaurants at 1,598,772, followed by Florida (FL) with 1,161,405. Other notable states include California (CA) and Nevada (NV), which have significantly fewer counts compared to the top states, highlighting a skewed distribution. This indicates that the data is biased toward certain states, so we should focus our analysis on the overall USA, restaurant categories rather than state-specific distributions.
 
-#### The Five most popular restaurant categories.
+#### Most Popular Restaurant Categories
 
 Let's explore the overall distribution of categories, showcasing the various types of restaurants. We will only focus on categories categorized as restaurants. Since specific types like steakhouses and sushi bars have fewer entries, so we considered only the broader categories across all classifications.
 
 ```{r}
-yelp_categories <- yelp %>%
+yelp_categories <- yelp_sample %>%
   mutate(sorted_categories = sapply(strsplit(as.character(categories), ",\\s*"), function(x) paste(sort(x), collapse = " "))
   ) %>% mutate(sorted_categories = case_when(
   sorted_categories %in% c('Italian Pizza Restaurants') ~ 'Pizza Restaurants',
@@ -170,24 +169,15 @@ ggplot(top_sorted_categories, aes(x = reorder(sorted_categories, n), y = n)) +
   coord_flip() +  
   theme_minimal() +
   theme(axis.text.y = element_text(size = 10)) 
-
 ```
 
 The bar chart displays the top 5 sorted restaurant categories based on their frequency. Pizza Restaurants lead with 2,426 entries, followed by Mexican Restaurants (1,400), Chinese Restaurants (1,359), Burgers Fast Food Restaurants (815), and Japanese Restaurants (499).
 
-
-
 ### Analysis for the entire USA
+
 #### Data Cleaning
 
-Observing the csv file, we see that the `yelping_since` column give the specific date and time at which the user created their Yelp profile. We do not require such detailed information for our analysis so we will keep only the year the user joined Yelp.
-
-```{r}
-yelp_sample <- yelp_sample %>%
-  mutate(yelping_since = substr(yelping_since, 1, 4)) # get only the year
-```
-
-We also want to clean the actual reviews so that we are able to properly perform NLP analysis on the text. That is done below by removing punctuation, symbols, extra white space, adding a space before capital letters, and replacing all uppercase with lowercase letters.
+We want to clean the actual reviews so that we are able to properly perform NLP analysis on the text. That is done below by removing punctuation, symbols, extra white space, adding a space before capital letters, and replacing all uppercase with lowercase letters.
 
 ```{r}
 # cleaning the reviews (text column)
@@ -356,8 +346,8 @@ ggraph(pos_bigrams, layout = "fr") +
 
 We see from the above bigram network for 4-5 star reviews that
 
-
 ### Analysis based on restaurant categories
+
 #### Cleaning the data and eliminating stop words.
 
 Global stop words are words such as "didn't", "of", and "or", for example.These words are very common and typically don’t add much to the meaning of a text so we can remove them to focus on relevant words. We use the tidytext stop words lexicon.
@@ -493,8 +483,4 @@ For example, the last world cloud shows the most common negative words in 1-star
 
 ### Result
 
-
-
 ### Conclusion
-
-
