@@ -54,6 +54,8 @@ library(RColorBrewer)
 
 #### Load in Dataset
 
+Our dataset contains 7 variables: `text` (reviews). `city` (cities the business was based in), `categories` (business categories such as "Breakfast", "Juice Bar"), `review_stars` (star rating reviewer's gave a business), `yelping_since` (time at which Yelp user opened their account), `state` (states in which the business was based in), and `business_id` (unique code given to each individual business).
+
 ```{r}
 yelp <- fread("~/Downloads/cleaned_dataset.csv")
 ```
@@ -132,7 +134,7 @@ yelp_sample %>%
   coord_flip()
 ```
 
-This bar chart illustrates the distribution of restaurants across states, with only states having more than 50 counts displayed. Pennsylvania (PA) has the highest count of restaurants at 1,598,772, followed by Florida (FL) with 1,161,405. Other notable states include California (CA) and Nevada (NV), which have significantly fewer counts compared to the top states, highlighting a skewed distribution. This indicates that the data is biased toward certain states, so we should focus our analysis on the overall USA, restaurant categories rather than state-specific distributions.
+This bar chart illustrates the distribution of restaurants across states, with only states having more than 50 counts displayed. Pennsylvania (PA) has the highest count of restaurants followed by Florida (FL). Other notable states include California (CA) and Nevada (NV), which have significantly fewer counts compared to the top states, highlighting a skewed distribution. This indicates that the data is biased toward certain states, so we should focus our analysis on the overall USA, restaurant categories rather than state-specific distributions.
 
 #### Most Popular Restaurant Categories
 
@@ -171,7 +173,7 @@ ggplot(top_sorted_categories, aes(x = reorder(sorted_categories, n), y = n)) +
   theme(axis.text.y = element_text(size = 10)) 
 ```
 
-The bar chart displays the top 5 sorted restaurant categories based on their frequency. Pizza Restaurants lead with 2,426 entries, followed by Mexican Restaurants (1,400), Chinese Restaurants (1,359), Burgers Fast Food Restaurants (815), and Japanese Restaurants (499).
+The bar chart displays the top 5 sorted restaurant categories based on their frequency. Pizza Restaurants lead, followed by Mexican Restaurants, Chinese Restaurants, Burgers Fast Food Restaurants, and Japanese Restaurants.
 
 ### Analysis for the entire USA
 
@@ -184,7 +186,7 @@ We want to clean the actual reviews so that we are able to properly perform NLP 
 remove <- c('[[:punct:]]', 
             '[[:digit:]]', 
             '[[:symbol:]]',
-            'im', 'ive', 'didnt') %>%
+            'im', 'ive', 'didnt', 'dont') %>%
   paste(collapse = '|')
 
 yelp_sample$text <- yelp_sample$text %>% 
@@ -223,7 +225,7 @@ yelp_sample_tokenized <- yelp_sample %>%
 
 word_counts <- yelp_sample_tokenized %>%
   count(word, sort = TRUE) %>%
-  filter(n > 10000) %>%
+  filter(n > 1000) %>%
   mutate(word = reorder(word, n))
 
 ggplot(word_counts[1:20,], aes(n, word)) +
@@ -237,7 +239,7 @@ We now want to observe the difference between the most common words in lower rat
 ```{r}
 word_counts_by <- yelp_sample_tokenized %>%
   count(review_stars, word, sort = TRUE) %>%
-  filter(n > 600) %>%
+  filter(n > 400) %>%
   mutate(word = reorder_within(word, n, review_stars))
   
 word_counts_1to3 <- word_counts_by %>%
@@ -275,7 +277,7 @@ print(plot_4to5)
 
 #### Word Cloud
 
-Word clouds allow us to visualize the most common words in a different way. The larger the word is shown, the more common it is. We have created a word cloud that distinguishes words based on negative or positive sentiment. The red words indicate positive sentiment and the blue words indicate negative sentiment.
+Word clouds allow us to visualize the most common words in a different way. The larger the word is shown, the more common it is. We have created a word cloud that distinguishes words based on negative or positive sentiment. The red words indicate negative sentiment and the blue words indicate positive sentiment.
 
 ```{r}
 sentiment_counts <- yelp_sample_tokenized %>%
@@ -312,7 +314,7 @@ yelp_bigrams <- readRDS("yelp_bigrams.rds")
 neg_bigrams <- yelp_bigrams %>%
   filter(review_stars %in% c(1, 2, 3)) %>%
   count(word1, word2) %>%
-  filter(n > 150) %>%
+  filter(n > 50) %>%
   graph_from_data_frame()
 
 a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
@@ -325,13 +327,13 @@ ggraph(neg_bigrams, layout = "fr") +
   labs(title = "Bigram Network for 1-3 Star Reviews") 
 ```
 
-We see from the above bigram network for 1-3 star reviews that
+We see from the above bigram network for 1-3 star reviews that the strongest connections are between the words "customer" and "service." Negative customer service leaves a significant impact on reviewers and is commonly stated in negative reviews. Additionally, the bigram "front desk" is seen here. Negative experiences with the front desk is another representation of customer service having an impact on the reviews. "Credit card" is one other bigram in negative reviews – issues with finances and taking credit cards is seen as a negative to reviewers.
 
 ```{r}
 pos_bigrams <- yelp_bigrams %>%
   filter(review_stars %in% c(4, 5)) %>%
   count(word1, word2) %>%
-  filter(n > 400) %>%
+  filter(n > 100) %>%
   graph_from_data_frame()
 
 a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
@@ -344,7 +346,7 @@ ggraph(pos_bigrams, layout = "fr") +
   labs(title = "Bigram Network for 4-5 Star Reviews") 
 ```
 
-We see from the above bigram network for 4-5 star reviews that
+We see from the above bigram network for 4-5 star reviews that the most relevant bigram is "highly recommend". The words "customer service" is again a relevant bigram. This tells us that reviewers highly value that aspect and that is often is a contributing factor to how they rate businesses. This is again seen via the bigram "friendly staff". Another common bigram is "happy hour" which is something that customers seem to appreciate in businesses.
 
 ### Analysis based on restaurant categories
 
@@ -481,6 +483,14 @@ for (pair in restaurant_pairs) {
 
 For example, the last world cloud shows the most common negative words in 1-star reviews for Burgers Fast Food Restaurants (blue) and Japanese Restaurants (green). Larger words, such as "worst," "cold," "rude," "bad," and "terrible," indicate higher frequencies, reflecting significant customer dissatisfaction. Shared terms like "disappointed" and "horrible" highlight issues common to both categories. Unique complaints include "frozen" and "bland" for Burgers Fast Food Restaurants and "mediocre" or "filthy" for Japanese Restaurants. The visualization effectively distinguishes general and specific problems, offering insights into customer grievances for each type of restaurant.
 
-### Result
-
 ### Conclusion
+
+When analyzing Yelp data, food quality consistently emerges as the top priority for consumers when choosing a restaurant. Reviews frequently emphasize the taste, flavor, and authenticity of dishes, with particular attention given to standout items or specialties. The freshness of ingredients is often highlighted, especially when customers can discern high-quality or locally sourced products. Additionally, portion sizes and value for money are crucial, as diners expect meals that justify their cost.
+
+Service quality is also important, with consumers placing high value on friendly, polite, and attentive staff. Reviews often detail interactions with servers, praising efficient service and the effective resolution of issues such as delays or incorrect orders.
+
+Cleanliness is a vital factor that cannot be overlooked; patrons rightfully demand immaculate dining areas, pristine restrooms, and clear adherence to safety protocols, especially in the post-pandemic landscape.
+
+Ambiance plays a significant role in the decision-making process as well. Diners appreciate a comfortable and aesthetically pleasing environment, where elements like decor, music, and lighting create a welcoming atmosphere. Reviews typically mention whether a restaurant’s vibe is suitable for specific occasions, such as casual meet-ups, family outings, or romantic dinners.
+
+Lastly, convenience factors such as location, parking availability, and ease of reservations can heavily influence dining decisions, with customers frequently noting these aspects in their reviews.
