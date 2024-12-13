@@ -1,0 +1,507 @@
+---
+title: "Final Project: NLP on Yelp Reviews"
+format: pdf
+editor: visual
+---
+
+# PSTAT 134 - Group 19 : Keya Panchal, Richard Shim, Neil Xia, Jisu Yu, Yikai Zhou
+# 1. Introduction
+
+This project utilizes a precompiled dataset from Yelp, known as the Yelp Open Dataset, alongside data retrieved using the \textbf{Yelp Fusion API}. The dataset is made for academic use and research. The data is in JSON format and includes 6,990,280 reviews from 150,346 businesses across 11 metropolitan areas. Additionally, there are about 900,000 tips from over a million users, which include over 1.2 million business attributes such as hours, parking, availability, and ambiance. The Yelp Fusion API is employed to supplement the dataset with real-time data, including additional business details and dynamic information such as updated reviews or ratings. The goal of this data science project is to utilize \textbf{natural language processing (NLP)} and perform exploratory data analysis to gain insights that can help reveal patterns and trends between reviewers/reviews and business star ratings, votes, business categories, and more. We are particularly interested in discovering which insights from reviews are impactful in determining review star ratings and thereby influencing business star ratings.
+
+
+# 2. Methods
+
+Due to the dataset being in JSON format, initial data cleaning was required. The file, \`get_data.R\`, retrieves the JSON file and converts the data into a more readable format as multiple CSV files. The script processes the JSON file in chunks of 1,000 lines and saves processed chunks of data into .rds files every 1,000,000 lines to prevent memory overload. 
+
+The file, \`dataset.R\`, is the script in which the CSV files are unified and unnecessary variables are dropped, such as the \`friends\` column.  This file results in a final and cleaned \`cleaned_dataset.csv\` file with over six million observations (reviews). The variables in this file are review_stars, text, city, categories, states and business_id.
+
+## Setup
+
+### Installing Packages
+
+```{r, message=FALSE}
+rm(list=ls())
+gc() 
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(stringr)
+library(igraph)
+library(data.table)
+library(ggraph)
+library(tidytext)
+library(wordcloud)
+library(stringr)
+library(textTinyR)
+library(tm)
+library(e1071)
+library(tidyr)
+library(caret)
+library(naniar)
+library(shiny)
+library(htmltools)
+library(kableExtra)
+library(tidyr)
+library(stopwords)
+library(reshape2)
+library(gridExtra) 
+library(dplyr)
+library(RColorBrewer)
+```
+
+### Load in Dataset
+
+Our dataset contains 7 variables: `text` (reviews). `city` (cities the business was based in), `categories` (business categories such as "Breakfast", "Juice Bar"), `review_stars` (star rating reviewer's gave a business), `yelping_since` (time at which Yelp user opened their account), `state` (states in which the business was based in), and `business_id` (unique code given to each individual business).
+
+```{r}
+yelp <- fread("cleaned_dataset.csv")
+```
+
+### Checking NA Values
+
+We see below that our CSV has no missing values. Therefore we may continue to further analysis.
+
+```{r}
+sum(is.na(yelp))
+```
+
+## Exploratory Data Analysis
+
+### Distribution of Reviewers' Star Ratings
+
+Let's take a look at the entire dataset's distribution of `review_stars`, the number of stars the reviewer gave the business.
+
+```{r}
+yelp %>%
+  ggplot(aes(x = review_stars)) +
+  geom_bar() +
+  labs(
+    title = "Distribution of Reviewers' Star Rating",
+    x = "Reviews' Star Ratings",
+    y = "Count"
+  ) +
+  scale_y_continuous(labels = comma) +  
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.3) +
+  theme_minimal()
+```
+
+This dataset has almost seven million observations. To work with the data, we will take a random sample of 100,000 reviews, stratified by `review_stars`.
+
+We stratify on `review_stars` to ensure that we are able to capture a representative distribution of reviews across all star ratings. Since `review_stars` reflects the sentiment or quality of the review (ranging from 1 star for very negative to 5 stars for very positive), stratifying by this variable guarantees that every rating level is proportionally included in the sample. This avoids over- or under-representing any particular rating category in the sample.
+
+```{r}
+yelp_sample <- yelp %>% 
+  group_by(review_stars) %>%
+  sample_frac(100000 / nrow(yelp)) %>%
+  ungroup()
+```
+
+We see that the proportion below remains the same. We can now begin with data cleaning of the working dataset, `yelp_sample`.
+
+```{r}
+yelp_sample %>%
+  ggplot(aes(x = review_stars)) +
+  geom_bar() +
+  labs(
+    title = "Distribution of Reviewers' Star Rating",
+    x = "Reviews' Star Ratings",
+    y = "Count"
+  ) +
+  scale_y_continuous(labels = comma) +
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.3) +
+  theme_minimal()
+
+```
+
+### Distribution of Reviews by State
+
+Let's examine the overall distribution of states, representing the locations of the restaurants.
+
+```{r}
+yelp_sample %>% 
+  count(state) %>%  
+  filter(n > 50) %>%  
+  ggplot(aes(x = reorder(state, n), y = n)) +  
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  labs(
+    title = "Distribution of States (More than 50 Counts)",
+    x = "State",
+    y = "Count") +
+  geom_text(aes(label = n), hjust = -0.3) +  
+  coord_flip()+
+  ylim(c(0,27000))+
+  theme_minimal()
+```
+
+This bar chart illustrates the distribution of restaurants across states, with only states having more than 50 counts displayed. Pennsylvania (PA) has the highest count of restaurants followed by Florida (FL). Other notable states include California (CA) and Nevada (NV), which have significantly fewer counts compared to the top states, highlighting a skewed distribution. This indicates that the data is biased toward certain states, so we should focus our analysis on the overall USA, restaurant categories rather than state-by-state analysis.
+
+### Most Popular Restaurant Categories
+
+Let's explore the overall distribution of categories, showcasing the various types of restaurants. We will only focus on restaurants categories. Since specific types like steakhouses and sushi bars have fewer entries, so we considered only the broader categories such as Pizza or Japanese restaurants across all classifications.
+
+```{r}
+yelp_categories <- yelp_sample %>%
+  mutate(sorted_categories = sapply(strsplit(as.character(categories), ",\\s*"), function(x) paste(sort(x), collapse = " "))
+  ) %>% mutate(sorted_categories = case_when(
+  sorted_categories %in% c('Italian Pizza Restaurants') ~ 'Pizza Restaurants',
+  T ~ sorted_categories
+))%>% mutate(sorted_categories = case_when(
+  sorted_categories %in% c("Japanese Restaurants Sushi Bars") ~ "Japanese Restaurants",
+  T ~ sorted_categories
+))
+
+yelp_categories2 <- yelp_categories %>%
+  filter(sorted_categories %in% c('Pizza Restaurants', 'Mexican Restaurants',
+                                  "Chinese Restaurants", "Burgers Fast Food Restaurants",
+                                  "Japanese Restaurants"))
+
+top_sorted_categories <- yelp_categories2 %>%
+  distinct(business_id, sorted_categories) %>%  
+  count(sorted_categories, sort = TRUE)
+
+ggplot(top_sorted_categories, aes(x = reorder(sorted_categories, n), y = n)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5), color = "black") +
+  labs(
+    title = "Top 5 Sorted Restaurants Categories",
+    x = "Sorted Categories",
+    y = "Count"
+  ) +
+  coord_flip() +  
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 10)) 
+```
+
+The bar chart displays the top 5 sorted restaurant categories based on their frequency. Pizza Restaurants lead, followed by Mexican Restaurants, Chinese Restaurants, Burgers Fast Food Restaurants, and Japanese Restaurants.
+
+# 3. Results
+## NLP analysis for the entire USA
+
+### Data Cleaning
+
+We want to clean the actual reviews so that we are able to properly perform NLP analysis on the text. That is done below by removing punctuation, symbols, extra white space, adding a space before capital letters, and replacing all uppercase with lowercase letters.
+
+```{r}
+# cleaning the reviews (text column)
+remove <- c('[[:punct:]]', 
+            '[[:digit:]]', 
+            '[[:symbol:]]',
+            'im', 'ive', 'didnt', 'dont') %>%
+  paste(collapse = '|')
+
+yelp_sample$text <- yelp_sample$text %>% 
+  str_remove_all('\'') %>%
+  str_replace_all(remove, ' ') %>%
+  str_replace_all("([a-z])([A-Z])", "\\1 \\2") %>%
+  tolower() %>%
+  str_replace_all("\\s+", " ")
+```
+
+### Removing Stop Words
+
+Global stop words are words such as "didn't", "of", and "or", for example. These words are very common and typically don’t add much to the meaning of a text so we can remove them to focus on relevant words. We use the tidytext stop words lexicon.
+
+```{r}
+# using tidytext stop words lexicon
+data("stop_words")
+
+yelp_sample %>% 
+  unnest_tokens(word, text) %>% # tokenizing reviews into words
+  anti_join(stop_words) %>% # removing stop words
+  count(word, sort = TRUE) %>% 
+  head(n = 30) %>% 
+  kbl() %>% 
+  scroll_box(width = "400px", height = "500px")
+```
+
+### Most Common Words
+
+Let's take a look at the top 20 most common words across all reviews.
+
+```{r}
+yelp_sample_tokenized <- yelp_sample %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words)
+
+word_counts <- yelp_sample_tokenized %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 1000) %>%
+  mutate(word = reorder(word, n))
+
+ggplot(word_counts[1:20,], aes(n, word)) +
+  geom_col() +
+  labs(y = NULL) +
+  theme_minimal()
+```
+
+We now want to observe the difference between the most common words in lower rated (1-3 star) reviews and the most common words in higher rated (4-5 star) reviews.
+
+```{r}
+word_counts_by <- yelp_sample_tokenized %>%
+  count(review_stars, word, sort = TRUE) %>%
+  filter(n > 400) %>%
+  mutate(word = reorder_within(word, n, review_stars))
+  
+word_counts_1to3 <- word_counts_by %>%
+  filter(review_stars %in% 1:3)
+
+plot_1to3 <- ggplot(word_counts_1to3[1:40, ], aes(x = n, y = word, fill = review_stars)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~review_stars, scales = "free_y", 
+             labeller = labeller(review_stars = function(x) paste(x, "Stars"))) +
+  scale_y_reordered() +
+  labs(title = "Most Common Words for Ratings 1 to 3",
+       x = "Frequency",
+       y = NULL) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
+
+print(plot_1to3)
+```
+
+For 1-star ratings, words like "food," "service," and "rude" dominate, reflecting strong dissatisfaction with service and delays. In 2-star reviews, "food" and "service" remain prominent, but the feedback is less descriptive. For 3-star reviews, the words "food," "service," and "nice" suggest a neutral or mildly positive sentiment, with additional mentions of menu items like "chicken." Overall, our findings are 1) food and service are key themes influencing customer ratings across all levels, and 2) extreme ratings are more likely to be descriptive.
+
+```{r}
+word_counts_4to5 <- word_counts_by %>%
+  filter(review_stars %in% 4:5)
+
+plot_4to5 <- ggplot(word_counts_4to5[1:40, ], aes(x = n, y = word, fill = review_stars)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~review_stars, scales = "free_y", 
+             labeller = labeller(review_stars = function(x) paste(x, "Stars"))) +
+  scale_y_reordered() +
+  labs(title = "Most Common Words for Ratings 4 to 5",
+       x = "Frequency",
+       y = NULL) +
+  theme_minimal()
+
+print(plot_4to5)
+```
+
+In the 4-star reviews, common words include "food," "service," "delicious," and "friendly," indicating satisfaction with food quality and service. For 5-star reviews, the word frequency expands to include highly positive terms like "amazing," "delicious," "love," "recommend," and "awesome," reflecting an exceptional dining experience. Both ratings emphasize "food" and "service," showing their consistent importance in customer feedback. The 5-star reviews also include more diverse descriptors such as "excellent," "perfect," and "highly," highlighting an overwhelmingly positive sentiment.
+
+### Word Cloud
+
+Word clouds allow us to visualize the most common words in a different way. The larger the word is shown, the more common it is. We have created a word cloud that distinguishes words based on negative or positive sentiment. The red words indicate negative sentiment and the blue words indicate positive sentiment.
+
+```{r, warning=FALSE}
+sentiment_counts <- yelp_sample_tokenized %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0)
+
+comparison.cloud(sentiment_counts,
+                 colors = c("red3", "navyblue"),
+                 max.words = 50, 
+                 scale = c(2.5, 0.5),
+                 random.order = FALSE,
+                 title.size = 1.5)
+```
+
+Positive words, shown in blue, include terms like "amazing," "delicious," "friendly," and "recommend," emphasizing high satisfaction and enjoyment. Negative words, shown in red, include "bad," "disappointed," "terrible," and "rude," reflecting dissatisfaction and poor experiences. The size of each word represents its frequency, with "love," "nice," and "fried" being among the most frequently mentioned terms. Overall, the visualization highlights the contrasting emotions expressed in customer feedback.
+
+### Bigram Networks
+
+Bigram networks allow us to visualize bigrams (groups of 2 associated words). The weight of the arrows indicate the strength of the correlation between two words. We create two graphs – one for lower rated (1-3 star) reviews and one for higher rated (4-5 star) reviews.
+
+```{r, eval = FALSE}
+yelp_bigrams <- yelp_sample %>% 
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  select(review_stars, word1, word2)
+
+saveRDS(yelp_bigrams, file = "yelp_bigrams.rds")
+```
+
+```{r}
+yelp_bigrams <- readRDS("yelp_bigrams.rds")
+
+neg_bigrams <- yelp_bigrams %>%
+  filter(review_stars %in% c(1, 2, 3)) %>%
+  count(word1, word2) %>%
+  filter(n > 150) %>%
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(neg_bigrams, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  labs(title = "Bigram Network for 1-3 Star Reviews") 
+```
+
+Common bigrams like "terrible service," "bad experience," and "minutes waited" emphasize dissatisfaction with service quality and time delays. Other notable connections include specific menu items like "onion rings," "french toast," and "fried rice," suggesting detailed complaints about food. Words like "phone call," "front desk," and "credit card" point to issues beyond food, possibly related to customer service or payment. Overall, the network illustrates recurring themes in low-rated reviews, focusing on both service and specific food items.
+
+```{r}
+pos_bigrams <- yelp_bigrams %>%
+  filter(review_stars %in% c(4, 5)) %>%
+  count(word1, word2) %>%
+  filter(n > 300) %>%
+  graph_from_data_frame()
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(pos_bigrams, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "violet", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  labs(title = "Bigram Network for 4-5 Star Reviews") 
+```
+
+Phrases like "absolutely delicious," "amazing food," and "excellent service" dominate, reflecting high satisfaction and enjoyment. Other positive connections include experiences such as "date night," "outdoor seating," and "pleasantly surprised," indicating praise for atmosphere and dining experiences. Specific menu items like "pulled pork," "bread pudding," and "spring rolls" are also frequently mentioned, showcasing customer appreciation for certain dishes. The network emphasizes an overall positive sentiment with detailed praise for food, service, and unique experiences.
+
+## NLP analysis based on restaurant categories
+
+### Cleaning the data and eliminating stop words.
+
+We apply the same process to the entire dataset, cleaning the data and removing stop words just as we did previously.
+
+```{r}
+filtered_yelp <- yelp_categories %>%
+  filter(sorted_categories %in% top_sorted_categories$sorted_categories)
+
+remove <- c('[[:punct:]]', '[[:digit:]]', '[[:symbol:]]', 'im', 'ive') %>%
+  paste(collapse = '|') 
+
+yelp_filtered_tokenized <- filtered_yelp %>%
+  mutate(text = str_remove_all(text, '\''),
+         text = str_replace_all(text, remove, ' '),
+         text = str_replace_all(text, "([a-z])([A-Z])", "\\1 \\2"),
+         text = tolower(text),
+         text = str_replace_all(text, "\\s+", " ")) %>%
+  unnest_tokens(word, text) %>%  
+  anti_join(stop_words, by = "word")  
+```
+
+### Word cloud representing positive reviews with 5-star ratings
+
+We are creating word clouds for positive 5-star reviews, comparing pairs of restaurant categories (e.g., Pizza Restaurants vs. Mexican Restaurants) by highlighting positive words identified using the "bing" sentiment lexicon. Each category is assigned a distinct color, and the most frequent words are displayed for each pair in a grid of word cloud plots.
+
+```{r}
+categories <- c("Pizza Restaurants", "Mexican Restaurants", "Chinese Restaurants", 
+                "Burgers Fast Food Restaurants","Japanese Restaurants")
+
+
+restaurant_pairs <- combn(categories, 2, simplify = FALSE)
+
+
+filtered_data <- yelp_filtered_tokenized %>%
+  filter(
+    sorted_categories %in% unlist(restaurant_pairs),
+    review_stars == 5
+  ) %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  filter(sentiment == "positive")  
+
+combined_data <- filtered_data %>%
+  count(sorted_categories, word, sort = TRUE)
+
+for (pair in restaurant_pairs) {
+  category1 <- pair[1]
+  category2 <- pair[2]
+  
+  # Filter data for the two restaurant categories
+  pair_data <- combined_data %>%
+    filter(sorted_categories %in% c(category1, category2))
+  
+  # Assign colors to the categories
+  pair_data <- pair_data %>%
+    mutate(color = case_when(
+      sorted_categories == category1 ~ "blue",
+      sorted_categories == category2 ~ "green"
+    ))
+  
+  # Generate the word cloud
+  par(mar = c(0, 0, 3, 0))  # Adjust margins
+  wordcloud(
+    words = pair_data$word,
+    freq = pair_data$n,
+    min.freq = 1,
+    max.words = 100,
+    random.order = FALSE,
+    scale = c(2, 0.4),
+    colors = pair_data$color
+  )
+  
+  title(main = paste("Positive with 5-Star Reviews Word Cloud \n",
+                     category1, "(Blue) vs. ", category2, "(Green)"),
+        cex.main = 0.8)
+}
+
+```
+
+The first plot compares Pizza Restaurants (blue) and Mexican Restaurants (green), with the size of each word representing its frequency. Larger words such as "delicious," "amazing," and "fresh" are the most commonly used descriptors for both types of restaurants. Overlapping words like "friendly," "love," and "excellent" highlight shared positive sentiments among customers. Meanwhile, unique words such as "authentic" for Mexican Restaurants and "favorite" for Pizza Restaurants reveal specific preferences and qualities appreciated by customers for each type of cuisine. This visualization effectively showcases both the commonalities and distinctions in customer reviews for these two restaurant categories.
+
+The ninth plot illustrates that Chinese restaurants (in blue) and Japanese restaurants (in green) share key terms like "fresh," "delicious," "friendly," and "recommend," emphasizing high satisfaction with food and service. Words such as "authentic," "amazing," and "excellent" highlight the outstanding experiences customers had at these establishments. Certain differences in word usage might point to differences in the natural of cuisines, though there is significant overlap in appreciation for freshness and taste. This word cloud effectively captures the positive sentiments associated with both cuisines. Overall, it underscores the shared qualities that make these restaurants highly rated while also hinting at subtle distinctions.
+
+One limitation of this analysis is the inability to account for the frequency of each category. For instance, when comparing pizza and burger restaurants, pizza establishments dominate the analysis because they are about four times more numerous than burger restaurants.
+
+### Word cloud representing negative reviews with 1-star ratings
+
+We are creating word clouds for negative 1-star reviews, comparing pairs of restaurant categories by highlighting negative words identified using the "bing" sentiment lexicon. Each category is assigned a distinct color, and the most frequent words are displayed for each pair in a grid of word cloud plots.
+
+```{r}
+#Negative review with 1 stars 
+filtered_data <- yelp_filtered_tokenized %>%
+  filter(
+    sorted_categories %in% unlist(restaurant_pairs),
+    review_stars == 1
+  ) %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  filter(sentiment == "negative")  
+
+combined_data <- filtered_data %>%
+  count(sorted_categories, word, sort = TRUE)
+
+for (pair in restaurant_pairs) {
+  category1 <- pair[1]
+  category2 <- pair[2]
+  
+  # Filter data for the two restaurant categories
+  pair_data <- combined_data %>%
+    filter(sorted_categories %in% c(category1, category2))
+  
+  # Assign colors to the categories
+  pair_data <- pair_data %>%
+    mutate(color = case_when(
+      sorted_categories == category1 ~ "blue",
+      sorted_categories == category2 ~ "green"
+    ))
+  
+  # Generate the word cloud
+  par(mar = c(0, 0, 3, 0))  # Adjust margins
+  wordcloud(
+    words = pair_data$word,
+    freq = pair_data$n,
+    min.freq = 1,
+    max.words = 100,
+    random.order = FALSE,
+    scale = c(2, 0.4),
+    colors = pair_data$color
+  )
+  
+  title(main = paste("Negative with 1-Star Reviews Word Cloud \n",
+                     category1, "(Blue) vs. ", category2, "(Green)"),
+        cex.main = 0.8)
+}
+```
+
+For example, the last world cloud shows the most common negative words in 1-star reviews for Burgers Fast Food Restaurants (blue) and Japanese Restaurants (green). Larger words, such as "worst," "cold," "rude," "bad," and "terrible," indicate higher frequencies, reflecting significant customer dissatisfaction. Shared terms like "disappointed" and "horrible" highlight issues common to both categories. Unique complaints include "frozen" and "bland" for Burgers Fast Food Restaurants and "mediocre" or "filthy" for Japanese Restaurants. The visualization effectively distinguishes general and specific problems, offering insights into customer grievances for each type of restaurant.
+
+
+# 4. Conclusion
+
+This analysis highlights several key themes that influence restaurant ratings and customer satisfaction. Food quality emerges as the most significant factor, with descriptors like "delicious," "amazing," and "fresh" frequently mentioned across all restaurant types. Positive terms such as "authentic" and "excellent" underscore the value customers place on taste, freshness, and the authenticity of dishes. The consistent focus on food quality, regardless of the cuisine, confirms its importance as the top priority for diners when choosing a restaurant.
+
+Service quality is another crucial determinant of customer experiences, with reviews often praising friendly, attentive, and polite staff. Conversely, negative reviews emphasize dissatisfaction caused by rude behavior, delays, or unresolved issues such as incorrect orders. The ability to address service-related problems effectively is a critical factor in fostering positive experiences, as evidenced by the recurring presence of service-related terms in both positive and negative feedback.
+
+Cleanliness is also essential, particularly in the current post-pandemic context. Customers expect clean and safe dining environments, and any lapses in cleanliness, such as messy dining areas or restrooms, can significantly impact a restaurant's reputation. Regardless of food or service quality, cleanliness remains a non-negotiable standard for customers and plays a major role in shaping their overall impression.
+
+Ambiance adds another layer to customer satisfaction, with diners appreciating environments that are both comfortable and visually appealing. Reviews highlight the importance of decor, lighting, and music in creating a welcoming atmosphere for various occasions, from casual meet-ups to romantic dinners. A restaurant’s ability to align its ambiance with customer expectations further enhances its appeal and contributes to positive experiences.
+
+Lastly, convenience factors such as location, parking, and ease of reservations are frequently noted in customer feedback. While these aspects may not directly affect the dining experience, they significantly influence customers' overall impressions and likelihood of returning or recommending a restaurant. However, one limitation of this analysis is the inability to account for the frequency of restaurant categories, as some cuisines (e.g., pizza) have a disproportionate representation in the data, potentially skewing comparisons. Despite this, the findings provide valuable insights into the key factors driving customer satisfaction and restaurant success.
